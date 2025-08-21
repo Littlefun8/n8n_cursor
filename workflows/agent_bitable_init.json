@@ -1,0 +1,229 @@
+{
+  "name": "Agent - Feishu Bitable Init & Ensure Fields",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "manualTrigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "keepOnlySet": true,
+        "values": {
+          "string": [
+            { "name": "bitable_app_token", "value": "{{$env.FEISHU_BITABLE_APP_TOKEN || ''}}" },
+            { "name": "bitable_table_id", "value": "{{$env.FEISHU_BITABLE_TABLE_ID || ''}}" },
+            { "name": "table_alias", "value": "n8n_doc_output" }
+          ]
+        }
+      },
+      "id": "configSet",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        420,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "none",
+        "requestMethod": "POST",
+        "url": "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+        "jsonParameters": true,
+        "sendBody": true,
+        "bodyParametersJson": "={\n  \"app_id\": \"{{$env.FEISHU_APP_ID}}\",\n  \"app_secret\": \"{{$env.FEISHU_APP_SECRET}}\"\n}"
+      },
+      "id": "feishuToken",
+      "name": "Feishu Tenant Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        640,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "none",
+        "requestMethod": "GET",
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/{{$items('Config')[0].json.bitable_app_token}}/tables",
+        "jsonParameters": true,
+        "sendHeaders": true,
+        "headerParametersJson": "={\n  \"Authorization\": \"Bearer {{$items('Feishu Tenant Token')[0].json.tenant_access_token}}\"\n}"
+      },
+      "id": "listTables",
+      "name": "List Tables",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        860,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Resolve or create table id by alias if not provided\nconst cfg = $items('Config')[0].json;\nlet tableId = cfg.bitable_table_id;\nconst alias = cfg.table_alias || 'n8n_doc_output';\nconst list = ($json.data && $json.data.items) ? $json.data.items : [];\nlet hit = list.find(t => t.table && (t.table.name === alias));\nif (tableId) {\n  return [{ json: { resolved_table_id: tableId, need_create: false, table_alias: alias } }];\n}\nif (hit && hit.table && hit.table.id) {\n  return [{ json: { resolved_table_id: hit.table.id, need_create: false, table_alias: alias } }];\n}\nreturn [{ json: { resolved_table_id: '', need_create: true, table_alias: alias } }];"
+      },
+      "id": "fnResolveOrCreate",
+      "name": "Fn Resolve Or Create",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        1080,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.need_create}}"
+            }
+          ]
+        }
+      },
+      "id": "ifNeedCreate",
+      "name": "IF Need Create Table",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "none",
+        "requestMethod": "POST",
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/{{$items('Config')[0].json.bitable_app_token}}/tables",
+        "jsonParameters": true,
+        "sendHeaders": true,
+        "headerParametersJson": "={\n  \"Authorization\": \"Bearer {{$items('Feishu Tenant Token')[0].json.tenant_access_token}}\",\n  \"Content-Type\": \"application/json; charset=utf-8\"\n}",
+        "sendBody": true,
+        "bodyParametersJson": "={\n  \"table\": { \n    \"name\": \"{{$items('Fn Resolve Or Create')[0].json.table_alias}}\",\n    \"default_view_name\": \"Default View\"\n  }\n}"
+      },
+      "id": "createTable",
+      "name": "Create Table (alias)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1520,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const id = $json.data && $json.data.table ? $json.data.table.id : ''; if(!id){ throw new Error('创建表失败'); } return [{ json: { resolved_table_id: id } }];"
+      },
+      "id": "fnPickCreatedId",
+      "name": "Fn Pick Created Id",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        1740,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "none",
+        "requestMethod": "GET",
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/{{$items('Config')[0].json.bitable_app_token}}/tables/{{ $json.resolved_table_id || $items('Fn Resolve Or Create')[0].json.resolved_table_id }}/fields",
+        "jsonParameters": true,
+        "sendHeaders": true,
+        "headerParametersJson": "={\n  \"Authorization\": \"Bearer {{$items('Feishu Tenant Token')[0].json.tenant_access_token}}\"\n}"
+      },
+      "id": "listFields",
+      "name": "List Existing Fields",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1960,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Define required fields and types for grading output\nconst required = [\n  { name: '来源类型', type: 'text' },\n  { name: '文件标识', type: 'text' },\n  { name: '图片URL', type: 'text' },\n  { name: 'OCR文本', type: 'text' },\n  { name: '总分', type: 'number', property: { precision: 2 } },\n  { name: '内容相关性', type: 'number', property: { precision: 2 } },\n  { name: '结构连贯', type: 'number', property: { precision: 2 } },\n  { name: '语言准确性', type: 'number', property: { precision: 2 } },\n  { name: '词汇丰富度', type: 'number', property: { precision: 2 } },\n  { name: '字数', type: 'number', property: { precision: 0 } },\n  { name: '评分说明-内容', type: 'text' },\n  { name: '评分说明-结构', type: 'text' },\n  { name: '评分说明-语言', type: 'text' },\n  { name: '评分说明-总体', type: 'text' },\n  { name: '审核状态', type: 'single_select', property: { options: [ { name: '待审核' }, { name: '已通过' }, { name: '需复核' } ] } },\n  { name: '模型', type: 'text' },\n  { name: 'Rubric版本', type: 'text' },\n  { name: '置信度', type: 'number', property: { precision: 2 } },\n  { name: '创建时间', type: 'text' }\n];\nconst existing = ($json.data && $json.data.items) ? $json.data.items : [];\nconst existingNames = new Set(existing.map(f => f.field_name || f.name).filter(Boolean));\nconst toCreate = required.filter(r => !existingNames.has(r.name));\nreturn toCreate.map(f => ({ json: { field: { field_name: f.name, type: f.type, property: f.property || {} } } }));"
+      },
+      "id": "fnComputeMissing",
+      "name": "Fn Compute Missing Fields",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [
+        2180,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "none",
+        "requestMethod": "POST",
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/{{$items('Config')[0].json.bitable_app_token}}/tables/{{$items('Fn Pick Created Id')[0].json.resolved_table_id || $items('Fn Resolve Or Create')[0].json.resolved_table_id}}/fields",
+        "jsonParameters": true,
+        "sendHeaders": true,
+        "headerParametersJson": "={\n  \"Authorization\": \"Bearer {{$items('Feishu Tenant Token')[0].json.tenant_access_token}}\",\n  \"Content-Type\": \"application/json; charset=utf-8\"\n}",
+        "sendBody": true,
+        "bodyParametersJson": "={\n  \"field\": {{$json.field}}\n}"
+      },
+      "id": "createField",
+      "name": "Create Field",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2400,
+        240
+      ]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [ [ { "node": "Config", "type": "main", "index": 0 } ] ]
+    },
+    "Config": {
+      "main": [ [ { "node": "Feishu Tenant Token", "type": "main", "index": 0 } ] ]
+    },
+    "Feishu Tenant Token": {
+      "main": [ [ { "node": "List Tables", "type": "main", "index": 0 } ] ]
+    },
+    "List Tables": {
+      "main": [ [ { "node": "Fn Resolve Or Create", "type": "main", "index": 0 } ] ]
+    },
+    "Fn Resolve Or Create": {
+      "main": [ [ { "node": "IF Need Create Table", "type": "main", "index": 0 } ] ]
+    },
+    "IF Need Create Table": {
+      "main": [
+        [ { "node": "Create Table (alias)", "type": "main", "index": 0 } ],
+        [ { "node": "List Existing Fields", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Create Table (alias)": {
+      "main": [ [ { "node": "Fn Pick Created Id", "type": "main", "index": 0 } ] ]
+    },
+    "Fn Pick Created Id": {
+      "main": [ [ { "node": "List Existing Fields", "type": "main", "index": 0 } ] ]
+    },
+    "List Existing Fields": {
+      "main": [ [ { "node": "Fn Compute Missing Fields", "type": "main", "index": 0 } ] ]
+    },
+    "Fn Compute Missing Fields": {
+      "main": [ [ { "node": "Create Field", "type": "main", "index": 0 } ] ]
+    }
+  },
+  "active": false,
+  "settings": { "saveExecutionProgress": true },
+  "staticData": null,
+  "id": "agent-bitable-init"
+}
+
+
